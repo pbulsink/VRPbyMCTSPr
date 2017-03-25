@@ -1,0 +1,172 @@
+---
+title: "TSP in R"
+author: "Philip Bulsink"
+date: '2017-03-25'
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(TSP)
+library(RCurl)
+library(rjson)
+library(Matrix)
+library(plyr)
+library(dplyr)
+library(ggmap)
+library(pander)
+
+apis<-read.table("./data/apikey.txt")
+dm_api_key <- as.character(apis[1,1])
+rp_api_key <- as.character(apis[2,1])
+```
+
+A local (Ottawa, Ontario) company that I've worked with a bit has asked for a travelling salesman type application for their delivery trucks. 
+
+They'd like to know that a) their daily routes are optimized, and b) their clients are optimized to each delivery day. The first question is one of the typical Travelling Salesperson Problems, and the second is a basic Vehicle Routing Problem. Instead of having 5 vehicles running routes from a single depot, there's one vehicle running a route each of the 5 weekdays. This does ignore clients that need multiple deliveries per week, but they can be added back in later, either by hand or algorithmic ally. 
+
+The data can be read in from a .csv file quite easily. I'll use fake data (as to not expose their client list), focusing on hitting up the list of Ottawa area museums. 
+
+```{r read_data}
+locations <- read.csv("./data/museums.csv", stringsAsFactors = FALSE)
+locations$Number <- as.numeric(locations$Number)
+head(locations)
+```
+
+The list of museums is given as Name, Street Number, Street, City. 
+
+We'll use the [Google Maps Distance Matrix API](https://developers.google.com/maps/documentation/distance-matrix/) to calculate the distance between each point. We can then optimize the route visiting each one offline before asking Google for the actual route. 
+
+We'll stitch every part of the location frame together to give a list of places for Google. It does better without a place name.
+
+```{r clean_data}
+places<-apply(locations, 1, function(x) paste(x[2],x[3],x[4]))
+places<-trimws(places)
+places<-gsub(' ', '+', places)
+head(places)
+```
+
+We can feed this into our API URL creator. Note I add the API key, you'll have to get your own:
+
+```{r make_url_fn}
+#dm_api_key = [YOUR API KEY HERE]
+
+constructDistanceUrl <- function(origins,destinations,returnType = "json") {
+    root <- "https://maps.googleapis.com/maps/api/distancematrix/"
+    u <- paste(root, returnType, "?origins=", origins, "&destinations=",
+               destinations, "&key=", dm_api_key, sep = "")
+    return(u)
+}
+```
+
+But hold on. The free tier of the Google API only allows for a maximum of 25 origins or destinations at once. And a total of 100 elements per request (where elements = origins x destinations). And a total of 2500 elements in a day . We have to a) make a way to break up our requests, and b) prevent going over 2500/day.  We can also only call 
+
+We'll request in chunks:
+
+| Request | Origin | Destination |
+|---------|--------|-------------|
+| 1 | 1:10 | 1:10 |
+| 2 | 1:10 | 11:20 |
+| ... | ... | ... |
+| k | 11:20 | 1:10 |
+| k+1 | 11:20 | 11:20 |
+| ... | ... | ... |
+| n | 40:48 | 40:48 |
+
+```{r generate_request_list}
+buildRequestList<-function(nlocations){
+    s_main<-1:10
+    s_last<-(1:(nlocations%%10))+(10*(nlocations%/%10))
+    
+    call_list<-list()
+    counter<-1
+    for (i in 0:3){
+        for (j in 0:3){
+            r<-list('origin'=s_main + i*10, 'destin'=s_main + j*10)
+            call_list[counter] <- list(r)
+            counter <- counter + 1
+        }
+        r<-list('origin'=s_last, 'destin'=s_main + i*10)
+        call_list[counter] <- list(r)
+        counter <- counter + 1
+        r<-list('origin'=s_main + i*10, 'destin'=s_last)
+        call_list[counter] <- list(r)
+        counter <- counter + 1
+    }
+    r<-list('origin'=s_last, 'destin'=s_last)
+    call_list[counter] <- list(r)
+    return(call_list)
+}
+
+request_indices<-buildRequestList(nrow(locations))
+```
+
+This gives us a set of `r length(request_indices)` requests, by which point we'll have all of the distance matrices we need. Then we'll sew them together for one giant matrix.
+
+```{r make_urls}
+urllist<-character()
+
+for (i in 1:length(request_indices)){
+    o<-request_indices[[i]]$origin
+    origins<-paste0(places[o],collapse = '|')
+    d<-request_indices[[i]]$destin
+    destinations<-paste0(places[d],collapse = '|')
+    urllist<-c(urllist,constructDistanceUrl(origins = origins, destinations = destinations))
+}
+
+substring(urllist[1],1,400)
+```
+
+We can process the returned json with this function. It looks gnarly but will suffice until I rewrite with applys:
+```{r json_processing}
+processDistanceMatrixJson<-function(jdata, norigin, ndestin, value = 'distance'){
+    dm<-matrix(NA, nrow=norigin, ncol=ndestin)
+    for(i in 1:norigin){
+        for(j in 1:ndestin){
+            q<-jdata$rows[[i]]$elements[[j]]
+            if(q$status == "OK"){
+                   dm[i,j] <- as.numeric(q[[value]]$value)
+            }
+        }
+    }
+    return(dm)
+}
+```
+
+Here is a sample API Call being processed.
+```{r call_urls, cache=TRUE}
+#This is cached to not have to waste API calls
+rawurl<-getURL(urllist[1])
+jsonurl<-fromJSON(rawurl)
+```
+
+```{r proc_json}
+if(jsonurl$status == 'OK'){
+    distance_mat<-processDistanceMatrixJson(jsonurl, length(request_indices[[1]]$origin), length(request_indices[[1]]$destin), 'distance')
+    time_mat<-processDistanceMatrixJson(jsonurl, length(request_indices[[1]]$origin), length(request_indices[[1]]$destin), 'duration')
+}
+rownames(distance_mat)<-locations[request_indices[[1]]$origin,1]
+colnames(distance_mat)<-locations[request_indices[[1]]$destin,1]
+rownames(time_mat)<-locations[request_indices[[1]]$origin,1]
+colnames(time_mat)<-locations[request_indices[[1]]$destin,1]
+pandoc.table(unname(distance_mat), style='rmarkdown', split.cells=10, split.table=Inf)
+```
+
+Time is given in seconds, and distance in meters. I had to hide the names of each place because they made the table too big. Note that these are not symmetrical, because sometimes there are one way streets or other limitations on routes. 
+
+Once we have everything available, in lists of matrices, we can stitch them into a majorly big matrix. Again, gnarly until rewritten with applys:
+```{r bigmatrix}
+# nlocations<-nrow(locations)
+# distance_mat_total<-time_mat_total<-matrix(NA,nrow=nlocations, ncol=nlocations)
+# for(i in 1:length(dmatlist)){
+#     d<-dmatlist[[i]]
+#     for(j in 1:nrow(d)){
+#         for(k in 1:ncol(d)){
+#             distance_mat_total[rownames(d)[i],rownames(d)[j]]<-d[i,j]
+#             time_mat_total[rownames(d)[i],rownames(d)[j]]<-tmatlist[[i]][i,j]
+#         }
+#     }
+# }
+```
+
+Now we can start the Travelling Salesperson Problem work.
