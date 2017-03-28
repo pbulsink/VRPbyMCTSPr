@@ -1,57 +1,93 @@
 ---
-title: "TSP in R Part 2"
+title: "TSP in R Part 1"
 author: "Philip Bulsink"
-date: '2017-03-26'
+date: '2017-03-27'
 output: html_document
 ---
 
 ```{r setup, include=FALSE}
 knitr::opts_chunk$set(echo = TRUE)
+library(TSP)
+library(RCurl)
+library(rjson)
+library(Matrix)
+library(plyr)
+library(dplyr)
+library(ggmap)
+library(pander)
+
+set.seed(1)
+
+apis<-read.table("./data/apikey.txt")
+dm_api_key <- as.character(apis[1,1])
+rp_api_key <- as.character(apis[2,1])
 ```
 
-One of the best TSP solvers available is Concord. It can be tough to build it on OSx, however, but after much digging I've found some instructions. It required the Way Back Machine to dig it out of some archives, so I'm reposting it here for posterity. 
+Last time we created a distance matrix and a time matrix for use in TSP problems. We're using a set of locations in the Ottawa, Ontario, Canada area, but any list of locations with addresses would work. 
 
-It comes from [http://davidsjohnson.net/TSPcourse/mac-install-concorde.txt](http://davidsjohnson.net/TSPcourse/mac-install-concorde.txt), with only minor modifications to update the tsp example url.
-
-This works on osX Sierra (10.12.3) with XCode 8.3, gcc 4.8.0, and clang-800.0.42.1. 
-```
-Introduction: No tutorial online gives up-to-date instructions about how to install concorde on a Mac. This
-document intends to fill that gap.
-
-Step 0. Make sure your mac has a working c compiler. Xcode uses clang, but tutorials online say you need gcc.
-Clang is fine. Type "cc" in the terminal to make sure it is installed. If not, the computer will prompt you
-to install Xcode terminal tools. Go ahead and install it.
-
-Step 1. Download concorde from here: http://www.math.uwaterloo.ca/tsp/concorde/downloads/codes/src/co031219.tgz
-Untar it to the desired location. The directory will be called "concorde"
-
-Setp 2. Donwload the Linear Programming solver here: http://www2.isye.gatech.edu/~wcook/qsopt/beta/index.html
-you want the qsopt.a and qsopt.h files. Make sure you use the 64 bit mac verions of the files.
-Store those in a directory somewhere. For the purposes of this note, we will call the directory "QSOPT"
-
-Step 3. cd to the concorde directory
-
-Step 4. In the terminal type: 
-
-export QSOPTDIR=path/to/QSOPT
-export CFLAGS="-g -O3 -arch x86_64"
-./configure --with-qsopt=$QSOPTDIR --host=darwin
-make
-
-Step 6. To test it, download a practice tsp instance. A common one (d493) is available from here: https://raw.githubusercontent.com/mhahsler/TSP/master/inst/examples/d493.tsp
-
-Step 7. cd to "concorde/TSP/" then execute "./concorde path/to/d493.tsp" 
-
-My macbook retina (the one that came out
-before the recent haswell processor version) uses OSX version 10.9.1 and has a dual core i7 with 8GB ram.
-It solved d493.tsp in 48.62 seconds.
-
-credits:
-http://davidsjohnson.net/TSPcourse/mac-install-concorde.txt
-http://wiki.evilmadscientist.com/Obtaining_a_TSP_solver
-http://stackoverflow.com/questions/18500923/issue-with-archive-which-is-not-the-architecture-being-linked-x86-64-in-c
-https://raw.githubusercontent.com/mhahsler/TSP/master/inst/examples/d493.tsp
-
+We'll start this time by loading the data we saved last time:
+```{r load_data}
+distance_matrix<-readRDS("./distance_matrix.RDS")
+time_matrix<-readRDS("./time_matrix.RDS")
 ```
 
-Again, this is not my work, but just a repost for posterity. Newer Macbooks can do better, I'm sure, but my old 2012 MacBookPro with osX Sierra (10.12.3) finished in just over 30 seconds. 
+Much of this post is informed by the [vignette in the TSP package](https://cran.r-project.org/web/packages/TSP/vignettes/TSP.pdf). There's lots of great documentation in a more 'tutorial' type format than the official documentation in R vignettes. 
+
+We'll start by making these matrices 'TSP' compatable objects. 
+```{r ATSP}
+ottawa_dm<-ATSP(distance_matrix)
+ottawa_tm<-ATSP(time_matrix)
+```
+
+Note that we use the ATSP function. The matrices we're feeding in aren't symmetrical. It may take longer or be farther to go from point A to point B than it is to go from B to A. This could be due to traffic, one way streets, the number of left hand turns, etc. 
+
+We can look at a few properties of this ATSP class:
+```{r}
+print(ottawa_dm)
+head(labels(ottawa_dm))
+```
+
+We can also visualize a shaded matrix of the distances between objects:
+```{r shade_matrix}
+image(ottawa_dm)
+```
+
+Let's solve the TSP by each of the internal methods and see what minimum distance for each we get:
+
+```{r}
+methods <- c("nearest_insertion", "farthest_insertion", "cheapest_insertion",
+"arbitrary_insertion", "nn", "repetitive_nn", "two_opt")
+dm_tours <- sapply(methods, FUN = function(m) solve_TSP(ottawa_dm, method = m), simplify = FALSE)
+
+dotchart(sort(c(sapply(dm_tours, tour_length))))
+```
+
+Concorde, Chained Lin-Kernighan (`linkern`) and other solvers can only do symmetric TSP. A function will convert our ATSP problem to a TSP for use with these advanced solvers. This function doubles each city, providing an 'in' and an 'out' city, with distance 0 between them (set as `cheap = 0`). 
+
+```{r make_TSP}
+ottawa_dm_tsp<-reformulate_ATSP_as_TSP(ottawa_dm, cheap = 0)
+ottawa_tm_tsp<-reformulate_ATSP_as_TSP(ottawa_tm, cheap = 0)
+
+print(ottawa_dm_tsp)
+```
+
+We have to set the Concorde TSP path. It seems to work only with an abspath, no `~` involved. 
+```{r}
+concorde_path("/Users/pbulsink/concorde/TSP")
+```
+
+We'll try solve the TSP using concorde:
+```{r concorde}
+dm_tours$concorde <- solve_TSP(ottawa_dm_tsp, method="concorde", control = list(verbose=FALSE))
+dm_tours$concorde
+dotchart(sort(c(sapply(dm_tours, tour_length))))
+```
+
+
+Similarly, we'll reset the path to use the Chained Lin-Kernighan (`linkern`) method:
+```{r linkern}
+concorde_path("/Users/pbulsink/concorde/LINKERN")
+dm_tours$linkern <- solve_TSP(ottawa_dm_tsp, method="linkern", control = list(verbose=FALSE))
+dotchart(sort(c(sapply(dm_tours, tour_length))))
+```
+

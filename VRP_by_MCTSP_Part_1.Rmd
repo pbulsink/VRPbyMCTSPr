@@ -35,7 +35,6 @@ loadLocationData <- function(f) {
 }
 
 locations<-loadLocationData("./data/museums.csv")
-locations<-locations[1:21,]
 head(locations)
 ```
 
@@ -116,7 +115,7 @@ getAPIurls <- function(locations, api_key_file = "./data/apikey.txt") {
     origins <- paste0(places[o], collapse = "|")
     d <- request_indices[[i]]$destin
     destinations <- paste0(places[d], collapse = "|")
-    urllist <- c(urllist, constructDistanceUrl(origins = origins, destinations = destinations))
+    urllist <- c(urllist, constructDistanceUrl(origins = origins, destinations = destinations, dm_api_key = dm_api_key))
   }
 
   return(urllist)
@@ -127,6 +126,7 @@ substring(urllist[1],1,400)
 ```
 
 We can process the returned json with this function. It looks gnarly but will suffice until I rewrite with applys:
+
 ```{r json_processing}
 processDistanceMatrixJson <- function(jdata, value = "distance", ...) {
   stopifnot(value %in% c("distance", "duration"))
@@ -147,15 +147,8 @@ processDistanceMatrixJson <- function(jdata, value = "distance", ...) {
 }
 ```
 
-Here is a sample API Call being processed.
-```{r call_urls, eval=FALSE}
-#This is not run to not have to waste API calls
-
-rawurl<-getURL(urllist[1])
-jsonurl<-fromJSON(rawurl)
-```
-
 We can do this for all calculated request groups:
+
 ```{r all_api_calls, cache=TRUE}
 getGDMResults <- function(urllist) {
   dmat_list <- tmat_list <- rawurl_list <- json_list <- error_list <- list(rep(NA, length(urllist)))
@@ -178,7 +171,7 @@ matlist<-getGDMResults(urllist = urllist)
 Time is given in seconds, and distance in meters. I had to hide the names of each place because they made the table too big. Note that these are not symmetrical, because sometimes there are one way streets or other limitations on routes. 
 
 ```{r show}
-matlist$dmat[[1]]
+unname(matlist$dmat[[1]])
 ```
 
 ```{r save, echo=FALSE}
@@ -190,7 +183,7 @@ saveRDS(matlist$errors, "./errorlist.RDS")
 ```
 
 Once we have everything available, in lists of matrices, we can stitch them into a majorly big matrix. Again, gnarly until rewritten with applys:
-```{r bigmatrix, eval=FALSE}
+```{r bigmatrix}
 assembleMatrix <- function(mlist) {
   locations <- unique(as.character(unlist(sapply(mlist, rownames))))
   nloc <- length(locations)
@@ -199,7 +192,7 @@ assembleMatrix <- function(mlist) {
   for (i in 1:length(mlist)) {
     d <- mlist[[i]]
     if (!is.na(d) && !is.null(d)) {
-        mat_total[match(rownames(dmat[[i]]), rownames(mat_total),  nomatch=0), match(colnames(dmat[[i]]), colnames(mat_total), nomatch = 0)]<-dmat[[i]]
+        mat_total[match(rownames(d), rownames(mat_total),  nomatch=0), match(colnames(d), colnames(mat_total), nomatch = 0)]<-d
     }
   }
   return(mat_total)
@@ -207,6 +200,10 @@ assembleMatrix <- function(mlist) {
 
 distance_matrix <- assembleMatrix(matlist$dmat)
 time_matrix <- assembleMatrix(matlist$tmat)
+
+#Save the distance and times matrices to file for later use
+saveRDS(distance_matrix, "./distance_matrix.RDS")
+saveRDS(time_matrix, "./time_matrix.RDS")
 ```
 
 Now that we have the distance matrices, we can start the Travelling Salesperson Problem work with the R package `TSP`. More in the next post.
