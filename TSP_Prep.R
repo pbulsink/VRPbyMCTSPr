@@ -184,7 +184,7 @@ assembleMatrix <- function(mlist) {
   for (i in 1:length(mlist)) {
     d <- mlist[[i]]
     if (!is.na(d) && !is.null(d)) {
-        mat_total[match(rownames(dmat[[i]]), rownames(mat_total),  nomatch=0), match(colnames(dmat[[i]]), colnames(mat_total), nomatch = 0)]<-dmat[[i]]
+        mat_total[match(rownames(d), rownames(mat_total),  nomatch=0), match(colnames(d), colnames(mat_total), nomatch = 0)]<-d
     }
   }
   return(mat_total)
