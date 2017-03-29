@@ -1,0 +1,52 @@
+---
+title: "VRP by GA-TSP"
+author: "Phil Bulsink"
+date: "March 29, 2017"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(TSP)
+library(RCurl)
+library(rjson)
+library(Matrix)
+library(plyr)
+library(dplyr)
+library(ggmap)
+library(pander)
+
+set.seed(1)
+
+apis<-read.table("./data/apikey.txt")
+dm_api_key <- as.character(apis[1,1])
+rp_api_key <- as.character(apis[2,1])
+```
+
+Last time we looked at solving a route to visit all of the museums in the Ottawa area. But, what if you were on a scavenger hunt with a friend, and needed to visit every place as quickly as possible, before meeting back at the starting point? You could break up your route into two pieces. Likewise, if you had 3 days to visit, and you wanted to minimize your driving over those three days, but needed to get back to the hotel every night, you would want a different route drawn. These situations are basic Vehicle Routing Problem (VRP) or multi-Travelling Salesperson Problems (mTSP). Just as there are many ways of solving the TSP, there's no one right way to solving a VRP. We'll look at using genetic algorithms in this post.
+
+<!--more-->
+
+Genetic algorithms are popular machine learning tools. I won't go into them in detail, but there are [many](https://en.wikipedia.org/wiki/Genetic_algorithm) [great](https://www.mathworks.com/discovery/genetic-algorithm.html) [posts](http://www.ai-junkie.com/ga/intro/gat1.html) on the [internet](http://www.theprojectspot.com/tutorial-post/creating-a-genetic-algorithm-for-beginners/3) about how they work, and [some](https://en.wikipedia.org/wiki/List_of_genetic_algorithm_applications) [applications](https://gist.github.com/nicolaspayette/1260949).
+
+I'll be using the R package [`GA`](https://cran.r-project.org/web/packages/GA/GA.pdf), but a few other options exist.
+
+We'll start again by loading the data we saved last time:
+```{r load_data}
+distance_matrix<-readRDS("./distance_matrix.RDS")
+time_matrix<-readRDS("./time_matrix.RDS")
+```
+
+A genetic algorithm needs a few things. It needs
+- A way to gauge what a 'good' or 'bad' result is (fitness function). We'll use fitness = 1/sum(tour_lengths), because that's what we're optimizing
+- A list of values to permutate. We'll just use the total number of stops - 1 (The hotel is a special case).
+
+
+
+
+
+
+
+
+
+We could make the algorithm smarter. Right now, it only looks to have n days of even number of stops, but that might not work. What if there's a few things on one road, it would be better to group them together.
