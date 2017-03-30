@@ -91,3 +91,8 @@ dm_tours$linkern <- solve_TSP(ottawa_dm_tsp, method="linkern", control = list(ve
 dotchart(sort(c(sapply(dm_tours, tour_length))))
 ```
 
+By looking at the bottom of the dot plot, we can see that the Lin-Kernighan and Concorde solvers provide the most optimal routes, and assorted substitution algorithms provide less qualified answers. 
+
+Next post we'll discuss mapping the routes visually. 
+
+*Remember that Concorde is licenced for academic use only, all other uses must be requested on the [Concorde website](www.math.uwaterloo.ca/tsp/concorde/index.html).*
